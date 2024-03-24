@@ -1,3 +1,4 @@
+import sys
 from http import HTTPStatus
 import os
 import logging
@@ -11,9 +12,13 @@ from exceptions import RequestAPIException
 
 load_dotenv()
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler(stream=sys.stdout)
+handler.setFormatter(
+    logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+)
+logger.addHandler(handler)
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -37,20 +42,20 @@ def check_tokens():
             TELEGRAM_TOKEN,
             TELEGRAM_CHAT_ID
     ):
-        logging.critical(
+        logger.critical(
             'Отсутствует одна из переменных окружения'
         )
         exit()
-    logging.debug('Все переменные окружения доступны.')
+    logger.debug('Все переменные окружения доступны.')
 
 
 def send_message(bot, message):
     """Отправляет сообщение в Telegram."""
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
-        logging.debug(f'Сообщение: {message} отправлено в Telegram.')
+        logger.debug(f'Сообщение: "{message}" отправлено в Telegram.')
     except telegram.error.BadRequest as error:
-        logging.error(
+        logger.error(
             f'Ошибка при отправке сообщения в Telegram: {error}'
         )
         raise telegram.error.BadRequest(
@@ -67,7 +72,7 @@ def get_api_answer(timestamp):
             params={'from_date': f'{timestamp}'}
         )
         if response.status_code != HTTPStatus.OK:
-            logging.error(
+            logger.error(
                 f'Запрос к эндпоинту {ENDPOINT} вернул статус-код: '
                 f'{response.status_code}'
             )
@@ -75,10 +80,10 @@ def get_api_answer(timestamp):
                 f'Запрос к эндпоинту {ENDPOINT}  вернул статус-код: '
                 f'{response.status_code}'
             )
-        logging.debug(f'Выполнен удачный запрос к эндпоинту {ENDPOINT}')
+        logger.debug(f'Выполнен удачный запрос к эндпоинту {ENDPOINT}')
         return response.json()
     except requests.RequestException as error:
-        logging.error(
+        logger.error(
             f'Ошибка запроса к API: {error}'
         )
         raise RequestAPIException(
@@ -91,17 +96,17 @@ def check_response(response):
     key_homeworks = 'homeworks'
     if type(response) != dict:
         error = f'Структура данных {type(response) }не является dict'
-        logging.error(error)
+        logger.error(error)
         raise TypeError(error)
     if response.get(key_homeworks) is None:
         error = f'Отсутствует ключ {key_homeworks} в ответе API'
-        logging.error(error)
+        logger.error(error)
         raise KeyError(error)
     if type(response.get(key_homeworks)) != list:
         error = f'Данные под ключом {key_homeworks} приходят не в виде списка'
-        logging.error(error)
+        logger.error(error)
         raise TypeError(error)
-    logging.debug('Получен релевантный ответ от API.')
+    logger.debug('Получен релевантный ответ от API.')
 
 
 def parse_status(homework):
@@ -112,7 +117,7 @@ def parse_status(homework):
         return f'Изменился статус проверки работы "{homework_name}". {verdict}'
     except KeyError as error:
         message = f'Ошибка в структуре статуса домашней работы: {error}'
-        logging.error(message)
+        logger.error(message)
         raise KeyError(message)
 
 
@@ -128,20 +133,20 @@ def main():
             check_response(response)
             homeworks = response.get('homeworks')
             if len(homeworks) != 0:
-                logging.debug('Получена информация о домашней работе.')
+                logger.debug('Получена информация о домашней работе.')
                 message = parse_status(homeworks[0])
             else:
                 message = ('Ошибка! В полученном от API ответе нет '
                            'информации о домашней работе.')
-                logging.error(message)
+                logger.error(message)
             if message != previous_message:
                 send_message(bot, message)
                 previous_message = message
             else:
-                logging.debug('Статус домашней работы не изменился.')
+                logger.debug('Статус домашней работы не изменился.')
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            logging.error(f'{message}')
+            logger.error(f'{message}')
         time.sleep(RETRY_PERIOD)
 
 
