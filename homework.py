@@ -8,8 +8,7 @@ from dotenv import load_dotenv
 import requests
 import telegram
 
-from exceptions import (BadStatusException, BadTokensException,
-                        EmptyResponseFromAPI)
+from exceptions import BadTokensException, EmptyResponseFromAPI
 
 load_dotenv()
 
@@ -23,7 +22,8 @@ stream_handler.setFormatter(
     logging.Formatter(log_format)
 )
 
-file_handler = logging.FileHandler(f'{__file__}.log')
+file_handler = logging.FileHandler(f'{__file__}.log',
+                                   encoding="UTF-8")
 file_handler.setFormatter(logging.Formatter(log_format))
 
 logger.addHandler(stream_handler)
@@ -53,7 +53,7 @@ def check_tokens():
     )
     check_value = True
     for names, token in tokens:
-        if token is None:
+        if not token:
             check_value = False
             logger.critical(
                 f'Отсутствует переменная окружения {names}'
@@ -83,36 +83,31 @@ def get_api_answer(timestamp):
     requests_options = {
         'url': ENDPOINT,
         'headers': HEADERS,
-        'params': {'from_date': f'{timestamp}'}
+        'params': {'from_date': timestamp}
     }
-    message = (f'{requests_options["url"]}'
-               f'с заголовком {requests_options["headers"]}'
-               f'и параметрами {requests_options["params"]}')
+    message = ('{} с заголовком {} и'
+               ' параметрами {}').format(*(requests_options.values()))
+    # Когда распаковываю двумя  звездами такая ошибка
+    # IndexError: Replacement index 0 out of range for positional args tuple
+    # message = ('{} с заголовком {} и '
+    #            'параметрами {}').format(**requests_options)
     logger.debug(f'Начат запрос к API {message}')
     try:
-        response = requests.get(
-            requests_options['url'],
-            headers=requests_options['headers'],
-            params=requests_options['params']
-        )
+        response = requests.get(**requests_options)
     except requests.RequestException as error:
-        logger.error(
-            f'Ошибка запроса к API: {error} {message}'
-        )
         raise ConnectionError(
             f'Ошибка запроса к API: {error} {message}'
         )
-    finally:
-        if response.status_code != HTTPStatus.OK:
-            raise requests.exceptions.HTTPError(
-                f'Запрос к эндпоинту {requests_options["url"]} '
-                f'вернул статус-код: {response.status_code},'
-                f'причина: {response.reason},'
-                f'с текстом {response.text}'
-            )
-        logger.debug(f'Выполнен удачный запрос к API '
-                     f'{requests_options["url"]}')
-        return response.json()
+    if response.status_code != HTTPStatus.OK:
+        raise requests.exceptions.HTTPError(
+            f'Запрос к эндпоинту {requests_options["url"]} '
+            f'вернул статус-код: {response.status_code},'
+            f'причина: {response.reason},'
+            f'с текстом {response.text}'
+        )
+    logger.debug(f'Выполнен удачный запрос к API '
+                 f'{requests_options["url"]}')
+    return response.json()
 
 
 def check_response(response):
@@ -120,18 +115,14 @@ def check_response(response):
     logger.debug('Начата проверка API на релевантность.')
     key_homeworks = 'homeworks'
     if not isinstance(response, dict):
-        error = f'Структура данных {type(response)} не является dict'
-        logger.error(error)
-        raise TypeError(error)
-    if response.get(key_homeworks) is None:
-        error = f'Отсутствует ключ {key_homeworks} в ответе API'
-        logger.error(error)
-        raise EmptyResponseFromAPI(error)
+        raise TypeError(f'Структура данных {type(response)} не является dict')
+    if key_homeworks not in response:
+        raise EmptyResponseFromAPI(f'Отсутствует ключ {key_homeworks} '
+                                   f'в ответе API')
     homeworks = response.get(key_homeworks)
     if not isinstance(homeworks, list):
-        error = f'Данные под ключом {key_homeworks} приходят не в виде списка'
-        logger.error(error)
-        raise TypeError(error)
+        raise TypeError(f'Данные под ключом {key_homeworks} приходят '
+                        f'не в виде списка')
     logger.debug('Получен релевантный ответ от API.')
     return homeworks
 
@@ -142,14 +133,11 @@ def parse_status(homework):
     if homework_status not in HOMEWORK_VERDICTS:
         message = (f'Полученный статус {homework_status} отсутствует '
                    f'в словаре вердиктов')
-        logger.error(message)
-        raise BadStatusException(message)
-    try:
-        homework_name = homework['homework_name']
-    except KeyError as error:
-        message = f'Ошибка в структуре статуса домашней работы: {error}'
-        logger.error(message)
-        raise KeyError(message)
+        raise ValueError(message)
+    key_homework = 'homework_name'
+    if key_homework not in homework:
+        raise KeyError(f'Ключ {key_homework} отсутствует в словаре {homework}')
+    homework_name = homework[key_homework]
     return (f'Изменился статус проверки работы "{homework_name}".'
             f' {HOMEWORK_VERDICTS[homework_status]}')
 
@@ -164,29 +152,21 @@ def main():
         try:
             response = get_api_answer(timestamp)
             homeworks = check_response(response)
-            if len(homeworks) == 0:
+            if not homeworks:
                 message = ('Ошибка! В полученном от API ответе нет '
                            'информации о домашней работе.')
                 logger.error(message)
-                if message != previous_message:
-                    if send_message(bot, message):
-                        previous_message = message
                 continue
             logger.debug('Получена информация о домашней работе.')
             message = parse_status(homeworks[0])
-            timestamp = 0
-            if message != previous_message:
-                send_message(bot, message)
+            if message != previous_message and send_message(bot, message):
                 previous_message = message
-                timestamp = response.get('time')
-            else:
-                logger.debug('Статус домашней работы не изменился.')
+                timestamp = response.get('current_date', 0)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            logger.error(f'{message}')
-            if message != previous_message:
-                if send_message(bot, message):
-                    previous_message = message
+            logger.error(f'{message}', exc_info=True)
+            if message != previous_message and send_message(bot, message):
+                previous_message = message
         finally:
             time.sleep(RETRY_PERIOD)
 
