@@ -23,7 +23,7 @@ stream_handler.setFormatter(
 )
 
 file_handler = logging.FileHandler(f'{__file__}.log',
-                                   encoding="UTF-8")
+                                   encoding='UTF-8')
 file_handler.setFormatter(logging.Formatter(log_format))
 
 logger.addHandler(stream_handler)
@@ -85,12 +85,8 @@ def get_api_answer(timestamp):
         'headers': HEADERS,
         'params': {'from_date': timestamp}
     }
-    message = ('{} с заголовком {} и'
-               ' параметрами {}').format(*(requests_options.values()))
-    # Когда распаковываю двумя  звездами такая ошибка
-    # IndexError: Replacement index 0 out of range for positional args tuple
-    # message = ('{} с заголовком {} и '
-    #            'параметрами {}').format(**requests_options)
+    message = ('{url} с заголовком {headers} и '
+               'параметрами {params}').format(**requests_options)
     logger.debug(f'Начат запрос к API {message}')
     try:
         response = requests.get(**requests_options)
@@ -161,7 +157,7 @@ def main():
             message = parse_status(homeworks[0])
             if message != previous_message and send_message(bot, message):
                 previous_message = message
-                timestamp = response.get('current_date', 0)
+                timestamp = response.get('current_date', timestamp)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.error(f'{message}', exc_info=True)
